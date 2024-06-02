@@ -1,6 +1,6 @@
 from functools import partial
 from collections import namedtuple
-from typing import Optional, Tuple, Union
+from typing import Optional, Tuple, Union, List
 
 import torch
 from torch.nn import Module, ModuleList
@@ -407,6 +407,7 @@ class TopNGating(Module):
         # Each sequence sends (at most?) expert_capacity positions to each expert.
         # Static expert_capacity dimension is needed for expert batch sizes
 
+        # NOTE: Initially, we should let expert capacity = group_size to have identical output as pretrained models, but we can anneal it as the fine-tuning goes on
         expert_capacity = min(group_size, int((group_size * capacity_factor) / num_gates))
         expert_capacity = max(expert_capacity, MIN_EXPERT_CAPACITY)
         expert_capacity_f = float(expert_capacity)
@@ -442,6 +443,7 @@ class TopNGating(Module):
         gates = rearrange(gates, '... k -> k ...')
         gate_indices = rearrange(gate_indices, '... k -> k ...')
 
+        # NOTE: why do we need one-hot vector? -> To perform operations on experts parallelly
         # masks
 
         one_hot_gate_indices = F.one_hot(gate_indices, num_gates)
@@ -521,6 +523,7 @@ class TopNGating(Module):
 
         dispatch_tensor = combine_tensor.bool().type(dtype)
 
+        # NOTE: let gradient flow through dispatch tensor? (so not just flat gradients from boolean operation)
         if self.straight_through_dispatch_tensor:
             dispatch_tensor = dispatch_tensor + combine_tensor - combine_tensor.detach()
 
@@ -562,7 +565,7 @@ class MoE(Module):
         gating_top_n = 2,
         balance_loss_coef = 1e-2,
         router_z_loss_coef = 1e-3,
-        experts: Optional[Module] = None,
+        experts: Optional[List[Module]] = None,
         straight_through_dispatch_tensor = True,
         differentiable_topk = False,
         differentiable_topk_fused = True,
@@ -573,6 +576,7 @@ class MoE(Module):
         self.dim = dim
         self.num_experts = num_experts
 
+        # TODO: can we make threshold and capacity_factor change over time?
         self.gate = TopNGating(
             dim,
             top_n = gating_top_n,
@@ -675,3 +679,24 @@ class SparseMoEBlock(Module):
             x = self.ff_after(x) + x
 
         return MixtureOfExpertsReturn(x, total_aux_loss, balance_loss, router_z_loss)
+
+
+if __name__ == '__main__':
+    moe = MoE(
+        dim=768,
+        num_experts=8,
+        gating_top_n=2,
+        threshold_train=0.2,
+        threshold_eval=0.2,
+        capacity_factor_train=1.25,
+        capacity_factor_eval=2.,
+        balance_loss_coef=1e-2,
+        router_z_loss_coef=1e-3,
+    )
+    moe_block = SparseMoEBlock(
+        moe,
+        add_ff_before=False,
+        add_ff_after=False
+    )
+    inputs = torch.rand(1, 128, 768)
+    moe_block(inputs)
