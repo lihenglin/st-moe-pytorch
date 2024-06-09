@@ -341,8 +341,8 @@ class TopNGating(Module):
         num_gates,
         eps = 1e-9,
         top_n = 2,
-        threshold_train: Union[float, Tuple[float, ...]] = 0.2,
-        threshold_eval: Union[float, Tuple[float, ...]] = 0.2,
+        # threshold_train: Union[float, Tuple[float, ...]] = 0.2,
+        # threshold_eval: Union[float, Tuple[float, ...]] = 0.2,
         capacity_factor_train = 1.25,
         capacity_factor_eval = 2.,
         straight_through_dispatch_tensor = True,
@@ -364,15 +364,15 @@ class TopNGating(Module):
 
         assert top_n >= 2, 'must be 2 or more experts'
         self.top_n = top_n
-        top_n_minus_1 = top_n - 1
+        # top_n_minus_1 = top_n - 1
 
-        threshold_train = cast_tuple(threshold_train, top_n_minus_1)
-        threshold_eval = cast_tuple(threshold_eval, top_n_minus_1)
+        # threshold_train = cast_tuple(threshold_train, top_n_minus_1)
+        # threshold_eval = cast_tuple(threshold_eval, top_n_minus_1)
 
-        assert len(threshold_train) == len(threshold_eval) == top_n_minus_1
+        # assert len(threshold_train) == len(threshold_eval) == top_n_minus_1
 
-        self.register_buffer('threshold_train', torch.tensor([eps, *threshold_train]))
-        self.register_buffer('threshold_eval', torch.tensor([eps, *threshold_eval]))
+        # self.register_buffer('threshold_train', torch.tensor([eps, *threshold_train]))
+        # self.register_buffer('threshold_eval', torch.tensor([eps, *threshold_eval]))
 
         self.capacity_factor_train = capacity_factor_train
         self.capacity_factor_eval = capacity_factor_eval        
@@ -383,6 +383,7 @@ class TopNGating(Module):
     def forward(
         self,
         x,
+        threshold,
         noise_gates = False,
         noise_mult = 1.
     ):
@@ -401,7 +402,8 @@ class TopNGating(Module):
 
         suffix = 'train' if self.training else 'eval'
 
-        threshold = getattr(self, f'threshold_{suffix}')
+        # threshold = getattr(self, f'threshold_{suffix}')
+        threshold = torch.tensor([self.eps] + [threshold] * (self.top_n - 1), device=x.device)
         capacity_factor = getattr(self, f'capacity_factor_{suffix}')
 
         # Each sequence sends (at most?) expert_capacity positions to each expert.
@@ -558,8 +560,8 @@ class MoE(Module):
         dim,
         num_experts = 16,
         expert_hidden_mult = 4,
-        threshold_train = 0.2,
-        threshold_eval = 0.2,
+        # threshold_train = 0.2,
+        # threshold_eval = 0.2,
         capacity_factor_train = 1.25,
         capacity_factor_eval = 2.,
         gating_top_n = 2,
@@ -576,15 +578,14 @@ class MoE(Module):
         self.dim = dim
         self.num_experts = num_experts
 
-        # TODO: can we make threshold and capacity_factor change over time?
         self.gate = TopNGating(
             dim,
             top_n = gating_top_n,
             num_gates = num_experts,
             straight_through_dispatch_tensor = straight_through_dispatch_tensor,
             differentiable_topk = differentiable_topk,
-            threshold_train = threshold_train,
-            threshold_eval = threshold_eval,
+            # threshold_train = threshold_train,
+            # threshold_eval = threshold_eval,
             capacity_factor_train = capacity_factor_train,
             capacity_factor_eval = capacity_factor_eval
         )
@@ -603,10 +604,11 @@ class MoE(Module):
     def forward(
         self,
         x,
+        threshold,
         noise_gates = False,
         noise_mult = 1.
     ):
-        dispatch_tensor, combine_tensor, balance_loss, router_z_loss = self.gate(x, noise_gates = noise_gates, noise_mult = noise_mult)
+        dispatch_tensor, combine_tensor, balance_loss, router_z_loss = self.gate(x, threshold, noise_gates = noise_gates, noise_mult = noise_mult)
 
         # dispatch
 
